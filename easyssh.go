@@ -36,12 +36,12 @@ type MakeConfig struct {
 
 // returns ssh.Signer from user you running app home path + cutted key path.
 // (ex. pubkey,err := getKeyFile("/.ssh/id_rsa") )
-func getKeyFile(keypath string) (ssh.Signer, error) {
+func getKeyFile(keypath string) (ssh.Signer,err error) {
 	var buf []byte
 	var ok bool
 	if buf,ok=keyMap[keypath];!ok{
 		file := keypath
-		buf, err := ioutil.ReadFile(file)
+		buf, err = ioutil.ReadFile(file)
 		if err != nil {
 			return nil, err
 		}
