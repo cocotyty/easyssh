@@ -11,13 +11,14 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
-	"os/user"
 	"path/filepath"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+	"bytes"
+	"sync"
 )
-
+var keyMap map[string][]byte=make(map[string][]byte)
 // Contains main authority information.
 // User field should be a name of user on remote server (ex. john in ssh john@example.com).
 // Server field should be a remote machine address (ex. example.com in ssh john@example.com)
@@ -36,23 +37,23 @@ type MakeConfig struct {
 // returns ssh.Signer from user you running app home path + cutted key path.
 // (ex. pubkey,err := getKeyFile("/.ssh/id_rsa") )
 func getKeyFile(keypath string) (ssh.Signer, error) {
-	usr, err := user.Current()
-	if err != nil {
-		return nil, err
-	}
-
-	file := usr.HomeDir + keypath
-	buf, err := ioutil.ReadFile(file)
-	if err != nil {
-		return nil, err
+	var buf []byte
+	var ok bool
+	if buf,ok=keyMap[keypath];!ok{
+		file := keypath
+		buf, err := ioutil.ReadFile(file)
+		if err != nil {
+			return nil, err
+		}
+		keyMap[keypath]=buf
 	}
 
 	pubkey, err := ssh.ParsePrivateKey(buf)
 	if err != nil {
 		return nil, err
 	}
-
 	return pubkey, nil
+
 }
 
 // connects to remote server using MakeConfig struct and returns *ssh.Session
@@ -92,6 +93,23 @@ func (ssh_conf *MakeConfig) connect() (*ssh.Session, error) {
 	return session, nil
 }
 
+type singleWriter struct {
+	b  bytes.Buffer
+	mu sync.Mutex
+}
+
+func (w *singleWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.b.Write(p)
+}
+func (w *singleWriter) Read(p []byte) (n int, err error){
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.b.Read(p)
+}
+
+
 // Stream returns one channel that combines the stdout and stderr of the command
 // as it is run on the remote machine, and another that sends true when the
 // command is done. The sessions and channels will then be closed.
@@ -101,19 +119,11 @@ func (ssh_conf *MakeConfig) Stream(command string) (output chan string, done cha
 	if err != nil {
 		return output, done, err
 	}
-	// connect to both outputs (they are of type io.Reader)
-	outReader, err := session.StdoutPipe()
-	if err != nil {
-		return output, done, err
-	}
-	errReader, err := session.StderrPipe()
-	if err != nil {
-		return output, done, err
-	}
-	// combine outputs, create a line-by-line scanner
-	outputReader := io.MultiReader(outReader, errReader)
+	var b singleWriter
+	session.Stdout = &b
+	session.Stderr = &b
 	err = session.Start(command)
-	scanner := bufio.NewScanner(outputReader)
+	scanner := bufio.NewScanner(&b)
 	// continuously send the command's output over the channel
 	outputChan := make(chan string)
 	done = make(chan bool)
