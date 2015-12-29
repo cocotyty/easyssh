@@ -6,15 +6,12 @@ package easyssh
 
 import (
 	"bufio"
-	"fmt"
 	"io"
 	"io/ioutil"
-	"net"
 	"os"
+	"fmt"
 	"path/filepath"
-
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/agent"
 	"bytes"
 	"sync"
 )
@@ -36,19 +33,18 @@ type MakeConfig struct {
 
 // returns ssh.Signer from user you running app home path + cutted key path.
 // (ex. pubkey,err := getKeyFile("/.ssh/id_rsa") )
-func getKeyFile(keypath string) (ssh.Signer,err error) {
+func getKeyFile(keypath string) (pubkey ssh.Signer,err error) {
 	var buf []byte
 	var ok bool
 	if buf,ok=keyMap[keypath];!ok{
 		file := keypath
 		buf, err = ioutil.ReadFile(file)
 		if err != nil {
-			return nil, err
+				return nil, err
 		}
 		keyMap[keypath]=buf
 	}
-
-	pubkey, err := ssh.ParsePrivateKey(buf)
+	pubkey, err = ssh.ParsePrivateKey(buf)
 	if err != nil {
 		return nil, err
 	}
@@ -66,15 +62,14 @@ func (ssh_conf *MakeConfig) connect() (*ssh.Session, error) {
 		auths = append(auths, ssh.Password(ssh_conf.Password))
 	}
 
-	if sshAgent, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK")); err == nil {
-		auths = append(auths, ssh.PublicKeysCallback(agent.NewClient(sshAgent).Signers))
-		defer sshAgent.Close()
-	}
+//	if sshAgent, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK")); err == nil {
+//		auths = append(auths, ssh.PublicKeysCallback(agent.NewClient(sshAgent).Signers))
+//		defer sshAgent.Close()
+//	}
 
 	if pubkey, err := getKeyFile(ssh_conf.Key); err == nil {
 		auths = append(auths, ssh.PublicKeys(pubkey))
 	}
-
 	config := &ssh.ClientConfig{
 		User: ssh_conf.User,
 		Auth: auths,
