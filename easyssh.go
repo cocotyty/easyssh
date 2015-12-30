@@ -12,8 +12,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"golang.org/x/crypto/ssh"
-	"bytes"
-	"sync"
 )
 var keyMap map[string][]byte=make(map[string][]byte)
 // Contains main authority information.
@@ -88,23 +86,6 @@ func (ssh_conf *MakeConfig) connect() (*ssh.Session, error) {
 	return session, nil
 }
 
-type singleWriter struct {
-	b  bytes.Buffer
-	mu sync.Mutex
-}
-
-func (w *singleWriter) Write(p []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.b.Write(p)
-}
-func (w *singleWriter) Read(p []byte) (n int, err error){
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.b.Read(p)
-}
-
-
 // Stream returns one channel that combines the stdout and stderr of the command
 // as it is run on the remote machine, and another that sends true when the
 // command is done. The sessions and channels will then be closed.
@@ -114,11 +95,18 @@ func (ssh_conf *MakeConfig) Stream(command string) (output chan string, done cha
 	if err != nil {
 		return output, done, err
 	}
-	var b singleWriter
-	session.Stdout = &b
-	session.Stderr = &b
+	outReader, err := session.StdoutPipe()
+	if err != nil {
+		return output, done, err
+	}
+	errReader, err := session.StderrPipe()
+	if err != nil {
+		return output, done, err
+	}
+	// combine outputs, create a line-by-line scanner
+	outputReader := io.MultiReader(outReader, errReader)
 	err = session.Start(command)
-	scanner := bufio.NewScanner(&b)
+	scanner := bufio.NewScanner(outputReader)
 	// continuously send the command's output over the channel
 	outputChan := make(chan string)
 	done = make(chan bool)
